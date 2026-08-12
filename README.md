@@ -60,12 +60,36 @@ with each other.
 
 ## If nothing is found
 
-Relax one assumption at a time.
+Relax one assumption at a time, cheapest first. Times assume 28 guesses/sec and
+that all 10 known characters are letters — every digit among them halves the
+case-related multiplier.
 
-Lowercase allowed: change `%[A-Z0-9]` to `%[A-Za-z0-9]` in `passwords.txt` and
-re-run. 3,845 guesses, ~2 min.
+| # | Assumption dropped | Change | Guesses | Time |
+|---|---|---|---|---|
+| 1 | caps lock was off | add `--typos 1 --typos-capslock` | 2,594 | ~2 min |
+| 2 | unknown chars are uppercase | `%[A-Za-z0-9]` in `passwords.txt` | 3,845 | ~2 min |
+| 3 | some known chars are the wrong case | 2 + `--typos 3 --typos-case` | 677k | ~7 hr |
+| 4 | any known char is the wrong case | 2 + `--typos 10 --typos-case` | 3.9M | ~39 hr |
+| 5 | the 2 unknown positions | see below | 85,536 | ~51 min |
+| 6 | positions *and* case | 5 + `--typos 12 --max-typos-insert 2 --typos-case` | 260M | ~107 days |
+| 7 | the order of the 10 known chars | — | ~10^11 | don't |
 
-You know the 10 chars in order but not their positions (85,536 guesses, ~51 min).
+### Case unknown, positions known (rows 1–4)
+
+```bash
+python btcrecover.py \
+  --bip38-enc-privkey 6PR................................................... \
+  --passwordlist passwords.txt --has-wildcards \
+  --typos 3 --typos-case \
+  --no-eta
+```
+
+`--typos N --typos-case` allows up to N of the characters to be the other case.
+Raise N to 10 for the full 39-hour version. `--typos-capslock` is separate and
+cheap — it flips the whole password at once, catching a stuck caps lock key.
+
+### Positions unknown (rows 5–6)
+
 `tokens.txt` holds the 10 known characters on one line:
 
 ```bash
@@ -82,8 +106,11 @@ python btcrecover.py \
 - `--max-adjacent-inserts 2` is required — without it the two unknown characters
   are never placed next to each other and a valid password is missed.
 - Drop `--min-typos 2` to also cover 10- and 11-char passwords.
-- One of the 10 "known" chars is wrong: add `--typos 3 --typos-replace '%[A-Z0-9]'
-  --max-typos-replace 1`. ~12 days.
+- Add case relaxation on top (row 6): `--typos 12 --max-typos-insert 2
+  --typos-case --typos-insert '%[A-Za-z0-9]'`. Run it with `--autosave` and leave
+  it going for weeks, or narrow it down first.
+- One of the 10 "known" chars is wrong outright: add `--typos 3 --typos-replace
+  '%[A-Z0-9]' --max-typos-replace 1`. ~12 days.
 
 ## Running it
 
