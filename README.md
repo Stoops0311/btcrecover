@@ -11,37 +11,45 @@ Password: 10 or 12 chars, `A–Z` and `0–9` only. 10 chars known, positions kn
 ```bash
 sudo apt update
 sudo apt install -y git python3-venv python3-pip
-
 cd ~
 git clone https://github.com/Stoops0311/btcrecover.git
 cd btcrecover
-
 python3 -m venv venv
 source venv/bin/activate
 pip install coincurve pycryptodome ecdsa
 ```
 
-Re-run `cd ~/btcrecover && source venv/bin/activate` in every new terminal.
+Re-run this in every new terminal:
+
+```bash
+cd ~/btcrecover && source venv/bin/activate
+```
 
 ## Verify the install
 
 ```bash
+cd ~/btcrecover
 printf 'TestingOneTwoThre\nTesting%%[OP]neTwoThree\n' > verify.txt
 python btcrecover.py \
   --bip38-enc-privkey 6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg \
   --passwordlist verify.txt --has-wildcards --no-eta
+rm verify.txt
 ```
 
-Must print `Password found: 'TestingOneTwoThree'` in ~2 seconds. Then `rm verify.txt`.
+Must print `Password found: 'TestingOneTwoThree'` in ~2 seconds.
 
 ## Run
 
-`passwords.txt` — line 1 is the 10-char version, line 2 is the 12-char version
-with `%[A-Z0-9]` at each unknown position. Substitute your real characters:
+Build `passwords.txt` — line 1 is the 10-char version, line 2 is the 12-char
+version with `%[A-Z0-9]` at each unknown position. **Replace the example
+characters with your real ones:**
 
-```
+```bash
+cd ~/btcrecover
+cat > passwords.txt <<'EOF'
 ABDEFGHJKL
 AB%[A-Z0-9]DEFGH%[A-Z0-9]JKL
+EOF
 ```
 
 ```bash
@@ -74,25 +82,46 @@ case-related multiplier.
 | 6 | positions *and* case | 5 + `--typos 12 --max-typos-insert 2 --typos-case` | 260M | ~107 days |
 | 7 | the order of the 10 known chars | — | ~10^11 | don't |
 
-### Case unknown, positions known (rows 1–4)
+### Rows 1–2 — caps lock, lowercase unknowns
+
+```bash
+cd ~/btcrecover
+cat > passwords.txt <<'EOF'
+ABDEFGHJKL
+AB%[A-Za-z0-9]DEFGH%[A-Za-z0-9]JKL
+EOF
+
+python btcrecover.py \
+  --bip38-enc-privkey 6PR................................................... \
+  --passwordlist passwords.txt \
+  --has-wildcards \
+  --typos 1 --typos-capslock \
+  --no-eta
+```
+
+### Rows 3–4 — case unknown, positions still known
 
 ```bash
 python btcrecover.py \
   --bip38-enc-privkey 6PR................................................... \
-  --passwordlist passwords.txt --has-wildcards \
+  --passwordlist passwords.txt \
+  --has-wildcards \
   --typos 3 --typos-case \
   --no-eta
 ```
 
-`--typos N --typos-case` allows up to N of the characters to be the other case.
-Raise N to 10 for the full 39-hour version. `--typos-capslock` is separate and
-cheap — it flips the whole password at once, catching a stuck caps lock key.
+`--typos N --typos-case` allows up to N characters to be the other case. Raise N
+to 10 for the full 39-hour version. `--typos-capslock` is separate and cheap — it
+flips the whole password at once, catching a stuck caps lock key.
 
-### Positions unknown (rows 5–6)
+### Rows 5–6 — positions unknown
 
-`tokens.txt` holds the 10 known characters on one line:
+`tokens.txt` holds your 10 known characters, in order, on one line:
 
 ```bash
+cd ~/btcrecover
+echo 'ABDEFGHJKL' > tokens.txt
+
 python btcrecover.py \
   --bip38-enc-privkey 6PR................................................... \
   --tokenlist tokens.txt \
@@ -106,39 +135,125 @@ python btcrecover.py \
 - `--max-adjacent-inserts 2` is required — without it the two unknown characters
   are never placed next to each other and a valid password is missed.
 - Drop `--min-typos 2` to also cover 10- and 11-char passwords.
-- Add case relaxation on top (row 6): `--typos 12 --max-typos-insert 2
-  --typos-case --typos-insert '%[A-Za-z0-9]'`. Run it with `--autosave` and leave
-  it going for weeks, or narrow it down first.
-- One of the 10 "known" chars is wrong outright: add `--typos 3 --typos-replace
-  '%[A-Z0-9]' --max-typos-replace 1`. ~12 days.
+- Row 6, positions *and* case — swap the typos flags for:
+  `--typos 12 --max-typos-insert 2 --typos-case --typos-insert '%[A-Za-z0-9]'`
+- One of the 10 "known" chars is wrong outright: add
+  `--typos 3 --typos-replace '%[A-Z0-9]' --max-typos-replace 1`. ~12 days.
+
+## Autosave and resuming
+
+Only needed for the long fallback runs. The main run is 46 seconds — if it gets
+interrupted, just run it again.
+
+**`--autosave` works with `--tokenlist` only.** Adding it to a `--passwordlist`
+command fails with `error: unrecognized arguments: --autosave`. That's why only
+the rows 5–6 command above has it.
+
+### Starting a run with autosave
+
+```bash
+python btcrecover.py \
+  --bip38-enc-privkey 6PR................................................... \
+  --tokenlist tokens.txt \
+  --typos 2 --min-typos 2 \
+  --typos-insert '%[A-Z0-9]' \
+  --max-adjacent-inserts 2 \
+  --autosave recovery.save \
+  --no-eta
+```
+
+`recovery.save` must not already exist (or must be empty) when you start a *new*
+search — if it has data in it, BTCRecover resumes the old run instead of starting
+fresh. To start over: `rm recovery.save`.
+
+Progress is written to the file:
+
+- every ~5 minutes while running, and
+- immediately when you press Ctrl-C, or the run dies from an out-of-memory error.
+
+So Ctrl-C loses nothing. A power cut loses at most 5 minutes.
+
+### Resuming
+
+Either of these works. The first is simpler:
+
+```bash
+cd ~/btcrecover && source venv/bin/activate
+python btcrecover.py --restore recovery.save
+```
+
+`--restore` must be the **only** option on the command line — every other setting,
+including the encrypted key and the tokenlist path, is stored inside the save file.
+It prints what it's resuming:
+
+```
+Restoring session: --bip38-enc-privkey 6PR... --tokenlist tokens.txt --typos 2 ...
+Last session ended having finished password # 1068
+Using autosave file 'recovery.save'
+```
+
+Or re-run the **exact same command** including `--autosave recovery.save`. It sees
+the data in the file and picks up where it left off.
+
+### Rules and failure modes
+
+- **`tokens.txt` must still exist, at the same path, byte-for-byte unchanged.** The
+  save file stores a hash of it. Edit it and the resume is refused.
+- Changing any option that affects which passwords get generated (`--typos`,
+  `--typos-insert`, the key, the tokenlist) makes a resume impossible. You get:
+  ```
+  ERROR: Can't restore previous session: the command line options have changed
+  in a way that will impact password generation.
+  ```
+  followed by a diff of the offending arguments. Harmless options like `--threads`
+  can change freely.
+- A save file made by an older version of BTCRecover with different password
+  ordering is rejected: `autosave was created with an incompatible version`.
+- The file is ~5 KB and holds two save slots, so a crash mid-write can't corrupt
+  it — it falls back to the other slot with a warning.
+
+### Resuming without autosave
+
+For `--passwordlist` runs, note the number Ctrl-C prints:
+
+```
+Interrupted after finishing password # 683
+```
+
+Re-run the *exact same command* plus `--skip 683`.
 
 ## Running it
 
-- `--threads 4` to cap CPU. Default is all cores.
-- Ctrl-C prints `Interrupted after finishing password # N`. Resume with the same
-  command plus `--skip N`.
-- With `--autosave recovery.save`: resume via `python btcrecover.py --restore
-  recovery.save`. Tokenlist only, not passwordlist.
-- Benchmark your machine: `python btcrecover.py --bip38-enc-privkey 6PR... --performance`
+- `--threads 4` to cap CPU usage. Default is every logical core.
+- Benchmark your machine:
+  ```bash
+  python btcrecover.py --bip38-enc-privkey 6PR... --performance
+  ```
+  Ctrl-C to stop. Divide the search size by the guesses/sec it reports.
 - Don't bother with `--enable-opencl`. Needs ≥6GB VRAM, roughly CPU-parity.
 
 ## After it's found
 
 1. Decrypt the `6PR…` key **offline** — local copy of bitaddress.org, Wallet
    Details tab.
-2. Confirm the address starts with `1Ld` and matches exactly.
+2. Confirm the address starts with `1Ld` and matches yours exactly.
 3. Sweep to a new wallet. The old key has been in plaintext on a general-purpose PC.
 
 ## Safety
 
 - Run offline. BTCRecover needs no internet.
 - Never paste the `6PR…` key or the password into a website, chat, forum, or AI chatbot.
-- The key lands in `~/.bash_history`. Clear it: `history -c && rm -f ~/.bash_history`
-- Delete `passwords.txt`, `tokens.txt`, `recovery.save` afterwards.
+- The key lands in `~/.bash_history`. Clear it:
+  ```bash
+  history -c && rm -f ~/.bash_history
+  ```
+- Delete the working files when done:
+  ```bash
+  rm -f ~/btcrecover/passwords.txt ~/btcrecover/tokens.txt ~/btcrecover/recovery.save
+  ```
 
 ## Reference
 
 - Wildcards and tokenlist syntax: [docs/tokenlist_file.md](docs/tokenlist_file.md)
 - Typos options: [docs/TUTORIAL.md](docs/TUTORIAL.md)
 - Other coins (`--bip38-currency litecoin|dash|…`): [docs/Usage_Examples/basic_password_recoveries.md](docs/Usage_Examples/basic_password_recoveries.md)
-- Upstream: <https://github.com/3rdIteration/btcrecover> (GPLv2)
